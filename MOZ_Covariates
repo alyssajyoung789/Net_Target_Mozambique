@@ -1,0 +1,429 @@
+################################################################
+# Mozambique Covariate Raster Layers for INLA-SPDE
+# Alyssa Young
+# 09.12.2020
+################################################################
+
+lapply(paste('package:',names(sessionInfo()$otherPkgs),sep=""),detach,character.only=TRUE,unload=TRUE)
+library(gdistance)
+library(abind)
+library(rje)
+library(ggplot2)
+library(malariaAtlas)
+library(readxl)
+library(raster)
+library(tiff)
+library(sf)
+require(rgdal)
+library(maptools)
+library(sp)
+library(exactextractr)
+library(writexl)
+
+###sITES USED TO ACCESS COVARIATE LAYERS:
+
+#https://ghsl.jrc.ec.europa.eu/download.php?ds=bu (use this site to pull Built Population, if you want (recommend pulling at 1km resolution))
+#https://ghsl.jrc.ec.europa.eu/download.php?ds=smod (use this site to pull SMOD (recommend pulling at 1km resolution))
+#https://ghsl.jrc.ec.europa.eu/download.php?ds=pop (use this site to pull population (recommend pulling at 1km resolution))
+#https://malariaatlas.org/explorer/#/ (use this site to pull prevalence of improved housing)
+#http://ghdx.healthdata.org/record/ihme-data/africa-educational-attainment-geospatial-estimates-2000-2015 (use this site to pull educational attainment – click on the files tab)
+
+# get ADM1 boundaries (for clipping when using tmap)
+MZ_adm1 <- st_read(dsn= "C:\\Users\\Alyssa\\OneDrive\\Desktop\\Malaria Consortium\\Mozambique data\\Mozambique_adm1_2000-2020.shp")
+adm1.spdf<-as(MZ_adm1, 'Spatial')
+
+#####################################
+##-----------------------------------
+##--Improved housing
+##-----------------------------------
+#####################################
+
+# https://malariaatlas.org/data-directory/
+
+# start with improved housing because it has the lowest resolution
+# snap all other covariate raster layers to the improved housing raster
+
+# load improved housing file as raster layer
+ImpHsng_2015.raster <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/2019_Nature_Africa_Housing_2015_MOZ.tif")
+ImpHsng_2015.raster <- mask(x = ImpHsng_2015.raster, mask = adm1.spdf) # mask
+ImpHsng_2015.raster <- crop(x = ImpHsng_2015.raster, y = extent(adm1.spdf)) # crop
+
+# plot raster layer for improved housing 
+p <- malariaAtlas::autoplot_MAPraster(ImpHsng_2015.raster,shp_df=adm1.spdf, printed=F)
+full_plot <- p[[1]] + 
+  scale_fill_gradientn(colors = rev(rje::cubeHelix(gamma=1.0,start=1.5,r=-1.0,hue=1.5,n=16)), 
+                       name="Prevalence") + 
+  ggtitle("Prevalence of Improved Housing") +
+  theme(axis.text=element_blank(),
+        panel.border=element_rect(fill=NA, color="white"))
+print(full_plot)
+ggsave(filename ="C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/2019_Nature_Africa_Housing_2015_MOZ.png", width =13.35, height=7.5, units ='in', dpi =320)
+rm(p, full_plot)
+
+#---------------------------------------------------------------------------#
+# read DHS cluster point data and convert them into spatial points data frame
+MOZ_clust <- st_read(dsn ="C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/MIS/MZGE7AFL.shp")
+MOZ_clust <- MOZ_clust[!(MOZ_clust$LATNUM==0),] # remove records
+MOZ_clust.df <- as.data.frame(MOZ_clust) # convert to df
+
+# subset data frames to urban/rural
+Urban.MOZ_clust.df <- subset(MOZ_clust.df, URBAN_RURA=="U")
+Rural.MOZ_clust.df <- subset(MOZ_clust.df, URBAN_RURA=="R")
+
+# set coordinates for each urban/rural data frame (convert to SPDF)
+coordinates(Urban.MOZ_clust.df)= ~ LONGNUM + LATNUM
+coordinates(Rural.MOZ_clust.df)= ~ LONGNUM + LATNUM
+
+# extract raster value by DHS cluster points (2km buffer for urban / 10km buffer for rural)
+rasValue.U<-extract(ImpHsng_2015.raster,Urban.MOZ_clust.df,buffer=2000,fun=mean,na.rm=TRUE)
+rasValue.R<-extract(ImpHsng_2015.raster,Rural.MOZ_clust.df,buffer=10000,fun=mean,na.rm=TRUE)
+
+# combine raster values with DHS cluster points and class as data.frame
+combinePointValue.U=as.data.frame(cbind(Urban.MOZ_clust.df,rasValue.U))
+combinePointValue.R=as.data.frame(cbind(Rural.MOZ_clust.df,rasValue.R))
+
+U.IH<-as.data.frame(combinePointValue.U[,c(4,11,20:22)])
+R.IH<-as.data.frame(combinePointValue.R[,c(4,11,20:22)])
+
+# set column name
+colnames(U.IH)[3] <- "ImpHsng_2015"
+colnames(R.IH)[3] <- "ImpHsng_2015"
+
+# rbind urban/rural data frames for each survey year
+ImpHsng_2015<-rbind(U.IH,R.IH)
+
+# remove objects that won't be saved
+# retain objects needed for creation of subsequent covariate raster layers
+rm(combinePointValue.R,combinePointValue.U,R.IH,rasValue.R,rasValue.U,U.IH)
+
+#####################################
+##-----------------------------------
+##--travel time to nearest large city (60K+)
+##-----------------------------------
+#####################################
+
+# point locations of large cities in Nigeria
+# https://simplemaps.com/data/ng-cities
+point.locations <- read_excel("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/MOZ_major_cities_pts.xlsx")
+coordinates(point.locations) <- ~ lng + lat # convert to SPDF
+points <- as.matrix(point.locations@coords) # create a matrix of lat-longs
+
+# plot defaults
+theme_set(theme_minimal(base_size=14))
+
+friction <- malariaAtlas::getRaster(surface = "A global friction surface enumerating land-based travel speed for a nominal year 2015", shp = adm1.spdf)
+
+T <- gdistance::transition(friction, function(x) 1/mean(x), 8) 
+T.GC <- gdistance::geoCorrection(T) 
+
+# run an "accumulated cost surface" algorithm to  calculate travel time
+TravTime.raster <- gdistance::accCost(T.GC, points)
+
+# replace Inf with NA
+TravTime.raster[!(is.finite(TravTime.raster))] <- NA 
+
+# mask to ADM0
+TravTime.raster <- mask(TravTime.raster, adm1.spdf)
+
+# plot raster layer for travel time 
+p <- malariaAtlas::autoplot_MAPraster(TravTime.raster,shp_df=adm1.spdf, printed=F)
+full_plot <- p[[1]] + geom_point(data=data.frame(point.locations@coords), 
+                                 aes(x=lng, y=lat)) +
+  scale_fill_gradientn(colors = rev(rje::cubeHelix(gamma=1.0,start=1.5,r=-1.0,hue=1.5,n=16)), 
+                       name="Minutes \n of Travel") + 
+  ggtitle("Travel Time") +
+  theme(axis.text=element_blank(),
+        panel.border=element_rect(fill=NA, color="white"))
+print(full_plot)
+ggsave(filename ="C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/TravTime.png", width =13.35, height=7.5, units ='in', dpi =320)
+rm(p, full_plot)
+
+#---------------------------------------------------------------------------#
+# extract raster value by DHS cluster points (2km buffer for urban / 10km buffer for rural)
+rasValue.U<-extract(TravTime.raster,Urban.MOZ_clust.df,buffer=2000,fun=mean,na.rm=TRUE)
+rasValue.R<-extract(TravTime.raster,Rural.MOZ_clust.df,buffer=10000,fun=mean,na.rm=TRUE)
+
+# combine raster values with DHS cluster points and class as data.frame
+combinePointValue.U=as.data.frame(cbind(Urban.MOZ_clust.df,rasValue.U))
+combinePointValue.R=as.data.frame(cbind(Rural.MOZ_clust.df,rasValue.R))
+
+U.TravTime<-as.data.frame(combinePointValue.U[,c(4,11,20:22)])
+R.TravTime<-as.data.frame(combinePointValue.R[,c(4,11,20:22)])
+
+# set column name
+colnames(U.TravTime)[3] <- "TravTime"
+colnames(R.TravTime)[3] <- "TravTime"
+
+# rbind urban/rural data frames for each survey year
+TravTime<-rbind(U.TravTime,R.TravTime)
+
+##--snap TravTime.raster to same dim/res/extent as ImpHsng_2015.raster
+#TravTime.raster <- projectRaster(TravTime.raster, ImpHsng_2015.raster, method='bilinear')
+
+rm(combinePointValue.R,combinePointValue.U,friction,point.locations,points,R.TravTime,rasValue.R,rasValue.U,T,T.GC,U.TravTime)
+
+#####################################
+##-----------------------------------
+##--Educational attainment for women of reproductive age
+##-----------------------------------
+#####################################
+
+# http://ghdx.healthdata.org/record/ihme-data/africa-educational-attainment-geospatial-estimates-2000-2015
+
+# load educational attainment file as raster layer: dowloaded mean education attainment for years 2014-2018, women of reproductive age 
+EducAttnmnt_2014_2018.raster <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/ED_AT_F_15_49.TIF")
+EducAttnmnt_2014_2018.raster <- mask(x = EducAttnmnt_2014_2018.raster, mask = adm1.spdf) # mask
+EducAttnmnt_2014_2018.raster <- crop(x = EducAttnmnt_2014_2018.raster, y = extent(adm1.spdf)) # crop
+
+# plot raster layer for Educational Attainment 
+p <- malariaAtlas::autoplot_MAPraster(EducAttnmnt_2014_2018.raster,shp_df=adm1.spdf, printed=F)
+full_plot <- p[[1]] + 
+  scale_fill_gradientn(colors = rev(rje::cubeHelix(gamma=1.0,start=1.5,r=-1.0,hue=1.5,n=16)), 
+                       name="Mean Years of Education") + 
+  ggtitle("Educational Attainment: Women 15-49yrs") +
+  theme(axis.text=element_blank(),
+        panel.border=element_rect(fill=NA, color="white"))
+print(full_plot)
+ggsave(filename ="C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/EducAttnmnt.png", width =13.35, height=7.5, units ='in', dpi =320)
+rm(p, full_plot)
+
+#---------------------------------------------------------------------------#
+# extract raster value by DHS cluster points (2km buffer for urban / 10km buffer for rural)
+rasValue.U<-extract(EducAttnmnt_2014_2018.raster,Urban.MOZ_clust.df,buffer=2000,fun=mean,na.rm=TRUE)
+rasValue.R<-extract(EducAttnmnt_2014_2018.raster,Rural.MOZ_clust.df,buffer=10000,fun=mean,na.rm=TRUE)
+
+# combine raster values with DHS cluster points and class as data.frame
+combinePointValue.U=as.data.frame(cbind(Urban.MOZ_clust.df,rasValue.U))
+combinePointValue.R=as.data.frame(cbind(Rural.MOZ_clust.df,rasValue.R))
+
+U.EducAttnmnt<-as.data.frame(combinePointValue.U[,c(4,11,20:22)])
+R.EducAttnmnt<-as.data.frame(combinePointValue.R[,c(4,11,20:22)])
+
+# set column name
+colnames(U.EducAttnmnt)[3] <- "EducAttnmnt_2014_2018"
+colnames(R.EducAttnmnt)[3] <- "EducAttnmnt_2014_2018"
+
+# rbind urban/rural data frames for each survey year
+EducAttnmnt_2014<-rbind(U.EducAttnmnt,R.EducAttnmnt)
+
+##--snap EducAttnmnt_2014.raster to same dim/res/extent as ImpHsng_2015.raster
+#EducAttnmnt_2014.raster <- projectRaster(EducAttnmnt_2014.raster, ImpHsng_2015.raster, method='bilinear')
+
+# remove objects that won't be saved
+# retain objects needed for creation of subsequent covariate raster layers
+rm(combinePointValue.R,combinePointValue.U,R.EducAttnmnt,rasValue.R,rasValue.U,U.EducAttnmnt)
+
+#####################################
+##-----------------------------------
+##--Built population @1km resolution, in grids (4)
+##-----------------------------------
+#####################################
+
+# https://ghsl.jrc.ec.europa.eu/download.php?ds=bu
+
+Blt.MOZ.1 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_BUILT_LDS2014_GLOBE_R2018A_54009_1K_V2_0_20_10.tif")
+Blt.MOZ.2 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_BUILT_LDS2014_GLOBE_R2018A_54009_1K_V2_0_20_11.tif")
+Blt.MOZ.3 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_BUILT_LDS2014_GLOBE_R2018A_54009_1K_V2_0_20_12.tif")
+Blt.MOZ.4 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_BUILT_LDS2014_GLOBE_R2018A_54009_1K_V2_0_21_10.tif")
+Blt.MOZ.5 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_BUILT_LDS2014_GLOBE_R2018A_54009_1K_V2_0_21_11.tif")
+Blt.MOZ.6 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_BUILT_LDS2014_GLOBE_R2018A_54009_1K_V2_0_21_12.tif")
+Blt.MOZ.7 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_BUILT_LDS2014_GLOBE_R2018A_54009_1K_V2_0_22_10.tif")
+
+Blt.MOZ.raster <- raster::mosaic(Blt.MOZ.1, Blt.MOZ.2, Blt.MOZ.3, Blt.MOZ.4, Blt.MOZ.5, Blt.MOZ.6, Blt.MOZ.7, fun=mean)
+rm(Blt.MOZ.1, Blt.MOZ.2, Blt.MOZ.3, Blt.MOZ.4, Blt.MOZ.5, Blt.MOZ.6, Blt.MOZ.7)
+
+newproj <- "+proj=longlat +datum=WGS84"
+Blt.MOZ.raster <- projectRaster(Blt.MOZ.raster, crs=newproj)
+
+#--mask and crop
+Blt.MOZ.raster <- mask(x = Blt.MOZ.raster, mask = adm1.spdf)
+Blt.MOZ.raster <- crop(x = Blt.MOZ.raster, y = extent(adm1.spdf))
+
+
+# plot raster layer for built population
+p <- malariaAtlas::autoplot_MAPraster(Blt.MOZ.raster,shp_df=adm1.spdf, printed=F)
+full_plot <- p[[1]] +
+  scale_fill_gradientn(colors = rev(rje::cubeHelix(gamma=1.0,start=1.5,r=-1.0,hue=1.5,n=16)),
+                       name="Urbanicity") +
+  ggtitle("Built Population") +
+  theme(axis.text=element_blank(),
+        panel.border=element_rect(fill=NA, color="white"))
+print(full_plot)
+ggsave(filename ="C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/BuiltPop.png", width =13.35, height=7.5, units ='in', dpi =320)
+rm(p, full_plot)
+
+# #---------------------------------------------------------------------------#
+# # read DHS cluster point data and convert them into spatial points data frame
+# #NGA_clust <- st_read(dsn ="D:/TRMD Files/Nigeria INLA/2018 DHS cluster coords/NGGE7AFL.shp")
+# #NGA_clust <- NGA_clust[!(NGA_clust$LATNUM==0),] # remove records
+# #NGA_clust.df <- as.data.frame(NGA_clust) # convert to df
+# #
+# ## subset data frames to urban/rural
+# #Urban.NGA_clust.df <- subset(NGA_clust.df, URBAN_RURA=="U")
+# #Rural.NGA_clust.df <- subset(NGA_clust.df, URBAN_RURA=="R")
+# #
+# ## set coordinates for each urban/rural data frame (convert to SPDF)
+# #coordinates(Urban.NGA_clust.df)= ~ LONGNUM + LATNUM
+# #coordinates(Rural.NGA_clust.df)= ~ LONGNUM + LATNUM
+# 
+# extract raster value by DHS cluster points (2km buffer for urban / 10km buffer for rural)
+rasValue.U<-extract(Blt.MOZ.raster,Urban.MOZ_clust.df,buffer=2000,fun=mean,na.rm=TRUE)
+rasValue.R<-extract(Blt.MOZ.raster,Rural.MOZ_clust.df,buffer=10000,fun=mean,na.rm=TRUE)
+
+# combine raster values with DHS cluster points and class as data.frame
+combinePointValue.U=as.data.frame(cbind(Urban.MOZ_clust.df,rasValue.U))
+combinePointValue.R=as.data.frame(cbind(Rural.MOZ_clust.df,rasValue.R))
+
+U.Built<-as.data.frame(combinePointValue.U[,c(4,11,20:22)])
+R.Built<-as.data.frame(combinePointValue.R[,c(4,11,20:22)])
+
+# set column name
+colnames(U.Built)[3] <- "Built_2014"
+colnames(R.Built)[3] <- "Built_2014"
+
+# rbind urban/rural data frames for each survey year
+Built_2014<-rbind(U.Built,R.Built)
+
+##--snap Blt.NGA.raster to same dim/res/extent as ImpHsng_2015.raster
+#Built_2014.raster <- projectRaster(Blt.NGA.raster, ImpHsng_2015.raster, method='bilinear')
+
+# remove objects that won't be saved
+# retain objects needed for creation of subsequent covariate raster layers
+rm(newproj,combinePointValue.R,combinePointValue.U,R.Built,rasValue.R,rasValue.U,U.Built)
+
+#####################################
+##-----------------------------------
+##--SMOD (Settlement Model)
+##-----------------------------------
+#####################################
+
+# https://ghsl.jrc.ec.europa.eu/download.php?ds=smod
+
+SMOD.MOZ.1 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_SMOD_POP2015_GLOBE_R2019A_54009_1K_V2_0_20_10.tif")
+SMOD.MOZ.2 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_SMOD_POP2015_GLOBE_R2019A_54009_1K_V2_0_20_11.tif")
+SMOD.MOZ.3 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_SMOD_POP2015_GLOBE_R2019A_54009_1K_V2_0_20_12.tif")
+SMOD.MOZ.4 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_SMOD_POP2015_GLOBE_R2019A_54009_1K_V2_0_21_10.tif")
+SMOD.MOZ.5 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_SMOD_POP2015_GLOBE_R2019A_54009_1K_V2_0_21_11.tif")
+SMOD.MOZ.6 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_SMOD_POP2015_GLOBE_R2019A_54009_1K_V2_0_21_12.tif")
+SMOD.MOZ.7 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_SMOD_POP2015_GLOBE_R2019A_54009_1K_V2_0_22_10.tif")
+
+SMOD.MOZ.raster <- raster::mosaic(SMOD.MOZ.1, SMOD.MOZ.2, SMOD.MOZ.3, SMOD.MOZ.4, SMOD.MOZ.5, SMOD.MOZ.6, SMOD.MOZ.7, fun=mean)
+rm(SMOD.MOZ.1, SMOD.MOZ.2, SMOD.MOZ.3, SMOD.MOZ.4, SMOD.MOZ.5, SMOD.MOZ.6, SMOD.MOZ.7)
+
+newproj <- "+proj=longlat +datum=WGS84"
+SMOD.MOZ.raster <- projectRaster(SMOD.MOZ.raster, crs=newproj)
+
+##--mask and crop
+SMOD.MOZ.raster <- mask(x = SMOD.MOZ.raster, mask = adm1.spdf)
+SMOD.MOZ.raster <- crop(x = SMOD.MOZ.raster, y = extent(adm1.spdf))
+
+# plot raster layer for built population 
+p <- malariaAtlas::autoplot_MAPraster(SMOD.MOZ.raster,shp_df=adm1.spdf, printed=F)
+full_plot <- p[[1]] + 
+  scale_fill_gradientn(colors = rev(rje::cubeHelix(gamma=1.0,start=1.5,r=-1.0,hue=1.5,n=16)), 
+                       name="Urbanicity") + 
+  ggtitle("SMOD") +
+  theme(axis.text=element_blank(),
+        panel.border=element_rect(fill=NA, color="white"))
+print(full_plot)
+ggsave(filename ="C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/SMOD.png", width =13.35, height=7.5, units ='in', dpi =320)
+rm(p, full_plot)
+
+#---------------------------------------------------------------------------#
+# extract raster value by DHS cluster points (2km buffer for urban / 10km buffer for rural)
+rasValue.U<-extract(SMOD.MOZ.raster,Urban.MOZ_clust.df,buffer=2000,fun=mean,na.rm=TRUE)
+rasValue.R<-extract(SMOD.MOZ.raster,Rural.MOZ_clust.df,buffer=10000,fun=mean,na.rm=TRUE)
+
+# combine raster values with DHS cluster points and class as data.frame
+combinePointValue.U=as.data.frame(cbind(Urban.MOZ_clust.df,rasValue.U))
+combinePointValue.R=as.data.frame(cbind(Rural.MOZ_clust.df,rasValue.R))
+
+U.SMOD<-as.data.frame(combinePointValue.U[,c(4,11,20:22)])
+R.SMOD<-as.data.frame(combinePointValue.R[,c(4,11,20:22)])
+
+# set column name
+colnames(U.SMOD)[3] <- "SMOD_2015"
+colnames(R.SMOD)[3] <- "SMOD_2015"
+
+# rbind urban/rural data frames for each survey year
+SMOD_2015<-rbind(U.SMOD,R.SMOD)
+
+##--snap SMOD.NGA.raster to same dim/res/extent as ImpHsng_2015.raster
+#SMOD_2015.raster <- projectRaster(SMOD.NGA.raster, ImpHsng_2015.raster, method='bilinear')
+
+# remove objects that won't be saved
+# retain objects needed for creation of subsequent covariate raster layers
+rm(newproj,combinePointValue.R,combinePointValue.U,R.SMOD,rasValue.R,rasValue.U,U.SMOD)
+
+#####################################
+##-----------------------------------
+##--POPULATION 2015
+##-----------------------------------
+#####################################
+
+# https://ghsl.jrc.ec.europa.eu/download.php?ds=pop
+
+POP.MOZ.1 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_20_10.tif")
+POP.MOZ.2 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_20_11.tif")
+POP.MOZ.3 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_20_12.tif")
+POP.MOZ.4 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_21_10.tif")
+POP.MOZ.5 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_21_11.tif")
+POP.MOZ.6 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_21_12.tif")
+POP.MOZ.7 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_22_10.tif")
+
+Pop.MOZ.raster <- raster::mosaic(POP.MOZ.1, POP.MOZ.2, POP.MOZ.3, POP.MOZ.4, POP.MOZ.5, POP.MOZ.6, POP.MOZ.7, fun=mean)
+rm(POP.MOZ.1, POP.MOZ.2, POP.MOZ.3, POP.MOZ.4, POP.MOZ.5, POP.MOZ.6, POP.MOZ.7)
+
+newproj <- "+proj=longlat +datum=WGS84"
+Pop.MOZ.raster <- projectRaster(Pop.MOZ.raster, crs=newproj)
+
+##--mask and crop
+Pop.MOZ.raster <- mask(x = Pop.MOZ.raster, mask = adm1.spdf)
+Pop.MOZ.raster <- crop(x = Pop.MOZ.raster, y = extent(adm1.spdf))
+
+# plot raster layer for built population 
+p <- malariaAtlas::autoplot_MAPraster(Pop.MOZ.raster,shp_df=adm1.spdf, printed=F)
+full_plot <- p[[1]] + 
+  scale_fill_gradientn(colors = rev(rje::cubeHelix(gamma=1.0,start=1.5,r=-1.0,hue=1.5,n=16)), 
+                       name="Population") + 
+  ggtitle("Population 2015") +
+  theme(axis.text=element_blank(),
+        panel.border=element_rect(fill=NA, color="white"))
+print(full_plot)
+ggsave(filename ="C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/Pop2015.png", width =13.35, height=7.5, units ='in', dpi =320)
+rm(p, full_plot)
+
+#---------------------------------------------------------------------------#
+# extract raster value by DHS cluster points (2km buffer for urban / 10km buffer for rural)
+rasValue.U<-extract(Pop.MOZ.raster,Urban.MOZ_clust.df,buffer=2000,fun=mean,na.rm=TRUE)
+rasValue.R<-extract(Pop.MOZ.raster,Rural.MOZ_clust.df,buffer=10000,fun=mean,na.rm=TRUE)
+
+# combine raster values with DHS cluster points and class as data.frame
+combinePointValue.U=as.data.frame(cbind(Urban.MOZ_clust.df,rasValue.U))
+combinePointValue.R=as.data.frame(cbind(Rural.MOZ_clust.df,rasValue.R))
+
+U.Pop<-as.data.frame(combinePointValue.U[,c(4,11,20:22)])
+R.Pop<-as.data.frame(combinePointValue.R[,c(4,11,20:22)])
+
+# set column name
+colnames(U.Pop)[3] <- "Population_2015"
+colnames(R.Pop)[3] <- "Population_2015"
+
+# rbind urban/rural data frames for each survey year
+Population_2015<-rbind(U.Pop,R.Pop)
+
+##--snap Pop.MOZ.raster to same dim/res/extent as ImpHsng_2015.raster
+#Population_2015.raster <- projectRaster(Pop.MOZ.raster, ImpHsng_2015.raster, method='bilinear')
+
+# remove objects that won't be saved
+# retain objects needed for creation of subsequent covariate raster layers
+rm(newproj,combinePointValue.R,combinePointValue.U,R.Pop,rasValue.R,rasValue.U,U.Pop)
+
+rm(adm1_MOZ,adm1.spdf,MOZ_clust,MOZ_clust.df,Rural.MOZ_clust.df,Urban.MOZ_clust.df)
+
+#rename rasters
+Population_2015.raster<-Pop.MOZ.raster
+SMOD_2015.raster<-SMOD.MOZ.raster
+Built_2014.raster<-Blt.MOZ.raster
+rm(Pop.MOZ.raster,SMOD.MOZ.raster,Blt.MOZ.raster)
+
