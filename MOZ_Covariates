@@ -363,23 +363,27 @@ rm(newproj,combinePointValue.R,combinePointValue.U,R.SMOD,rasValue.R,rasValue.U,
 
 # https://ghsl.jrc.ec.europa.eu/download.php?ds=pop
 
-POP.MOZ.1 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_20_10.tif")
-POP.MOZ.2 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_20_11.tif")
-POP.MOZ.3 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_20_12.tif")
-POP.MOZ.4 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_21_10.tif")
-POP.MOZ.5 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_21_11.tif")
-POP.MOZ.6 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_21_12.tif")
-POP.MOZ.7 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_22_10.tif")
+# POP.MOZ.1 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_20_10.tif")
+# POP.MOZ.2 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_20_11.tif")
+# POP.MOZ.3 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_20_12.tif")
+# POP.MOZ.4 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_21_10.tif")
+# POP.MOZ.5 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_21_11.tif")
+# POP.MOZ.6 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_21_12.tif")
+# POP.MOZ.7 <- raster("C:/Users/Alyssa/OneDrive/Desktop/Malaria Consortium/Mozambique data/INLA Covariate Layers/GHS_POP_E2015_GLOBE_R2019A_54009_1K_V1_0_22_10.tif")
+# 
+# Pop.MOZ.raster <- raster::mosaic(POP.MOZ.1, POP.MOZ.2, POP.MOZ.3, POP.MOZ.4, POP.MOZ.5, POP.MOZ.6, POP.MOZ.7, fun=mean)
+ rm(POP.MOZ.1, POP.MOZ.2, POP.MOZ.3, POP.MOZ.4, POP.MOZ.5, POP.MOZ.6, POP.MOZ.7)
+# 
+# newproj <- "+proj=longlat +datum=WGS84"
+# Pop.MOZ.raster <- projectRaster(Pop.MOZ.raster, crs=newproj)
 
-Pop.MOZ.raster <- raster::mosaic(POP.MOZ.1, POP.MOZ.2, POP.MOZ.3, POP.MOZ.4, POP.MOZ.5, POP.MOZ.6, POP.MOZ.7, fun=mean)
-rm(POP.MOZ.1, POP.MOZ.2, POP.MOZ.3, POP.MOZ.4, POP.MOZ.5, POP.MOZ.6, POP.MOZ.7)
 
-newproj <- "+proj=longlat +datum=WGS84"
-Pop.MOZ.raster <- projectRaster(Pop.MOZ.raster, crs=newproj)
+## Trying different raster layer
+MOZ_ppp<- raster(x = "C:\\Users\\Alyssa\\OneDrive\\Desktop\\Malaria Consortium\\Mozambique data\\population_moz_2019-07-01.tif")
 
 ##--mask and crop
-Pop.MOZ.raster <- mask(x = Pop.MOZ.raster, mask = adm1.spdf)
-Pop.MOZ.raster <- crop(x = Pop.MOZ.raster, y = extent(adm1.spdf))
+Pop.MOZ.raster <- mask(x = MOZ_ppp, mask = adm1.spdf)
+Pop.MOZ.raster <- crop(x = MOZ_ppp, y = extent(adm1.spdf))
 
 # plot raster layer for built population 
 p <- malariaAtlas::autoplot_MAPraster(Pop.MOZ.raster,shp_df=adm1.spdf, printed=F)
