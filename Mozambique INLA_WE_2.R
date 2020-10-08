@@ -24,6 +24,7 @@ library(exactextractr)
 library(writexl)
 require(raster)
 library(foreign)
+library(regclass)
 
 # read in 2018 Uganda MIS Stata or Excel file
 # DHS2018 <- readstata13::read.dta13("D:/TRMD Files/Nigeria INLA/Data/NigeriaDHS_2018.dta")
@@ -159,10 +160,12 @@ table(DHS2018$PopAccess_binary)
 
 #--------------------------------------------------------------------------#
 # get ADM0 boundaries (for clipping when using tmap)
-adm0_NGA <- sf::st_read(dsn ="C:/Users/mworges/Desktop/Nigeria/ShapeFiles/nga_admbnda_adm0_osgof_20190417.shp")
+# WE - note this is one of those shapefiles with a series of images for 
+# various variables, e.g. Shape_Leng, Shapre_Area, ADM0_EN
+adm0_MOZ <- sf::st_read(dsn ="C:/Users/admin/Box/WAH Work/Mozambique/MOZ/data_shp/moz_adm_shp_from_OCHA/moz_admbnda_adm0_ine_20190607.shp")
 
 # get DHS geospatial covariates shape file
-GPS_2018 <- st_read(dsn ="C:/Users/mworges/Desktop/Nigeria/NGGE7AFL.shp")
+GPS_2018 <- st_read(dsn = "C:/Users/admin/Box/WAH Work/Mozambique/DHS/MZGE7AFL.shp")
 GPS_2018 <- GPS_2018[!(GPS_2018$LATNUM==0),] # remove records
 
 ##--merge data frames with raster-to-buffer values
@@ -198,6 +201,12 @@ VIF_2018<-as.data.table(VIF(AnyNetUse))
 VIF_2018$VIFequivalent<-(VIF_2018$V1)^2
 VIF_2018
 
+# WE notes - VIF looks good
+# V1 VIFequivalent
+# 1: 1.407154      1.980083
+# 2: 1.375450      1.891862
+# 3: 1.039851      1.081290
+
 # net per 2 people
 NetperTwoPpl<-glm(NetperTwoPpl~TravTime+SMOD_2015+EducAttnmnt_2014,data = GPS_2018.df, family = binomial)
 
@@ -207,6 +216,12 @@ exp(cbind(OR = coef(NetperTwoPpl), confint(NetperTwoPpl)))
 VIF_2018<-as.data.table(VIF(NetperTwoPpl))
 VIF_2018$VIFequivalent<-(VIF_2018$V1)^2
 VIF_2018
+
+# WE notes - VIF looks ok
+# V1 VIFequivalent
+# 1: 1.463818      2.142764
+# 2: 1.434886      2.058899
+# 3: 1.035024      1.071275
 #------------------------------------------------------------------------------------------------
 
 # summarize by GPS points (clusters) - roll up net use column to proportions at clusters
