@@ -83,11 +83,51 @@ DHS2018$netuse_5[DHS2018$hml21_5=="no"]<-0
 DHS2018$netuse_6[DHS2018$hml21_6=="no"]<-0
 DHS2018$netuse_7[DHS2018$hml21_7=="no"]<-0
 
-DHS2018$net_used <- rowSums(subset(DHS2018, select = c(paste0("netuse_",1:7))), na.rm = T)
+# WE - check entries for DHS2018$netuse_... variables
+table(DHS2018$netuse_1, useNA = "always")
+table(DHS2018$netuse_2, useNA = "always")
+table(DHS2018$netuse_3, useNA = "always")
+table(DHS2018$netuse_4, useNA = "always")
+table(DHS2018$netuse_5, useNA = "always")
+table(DHS2018$netuse_6, useNA = "always")
+table(DHS2018$netuse_7, useNA = "always")
+
+# Check dimensions
+dim(DHS2018)
+# [1] 6196 3150
+
+# ******************************************
+# WE note: this code not working on 10-8-20
+#    Next step: verify  re-write code 
+# ******************************************
+# DHS2018$net_used <- rowSums(subset(DHS2018, select = c(paste0("netuse_",1:7))), na.rm = T)
+# WE - I Receive the following error after running this code above
+# Error in base::rowSums(x, na.rm = na.rm, dims = dims, ...) : 
+# invalid 'na.rm' argument
+
+# WE - trying "na.rm = TRUE" instead of "na.rm = T"
+DHS2018$net_used <- rowSums(subset(DHS2018, select = c(paste0("netuse_",1:7))), na.rm = TRUE)
+
+# WE - quick check of variable created
+table(DHS2018$net_used, useNA = "always")
+#   0    1    2    3    4    5    6    7 <NA> 
+# 983 1790 1824 1081  384   95   29   10    0 
+
 
 ##--any bed net use
 DHS2018$AnyNetUse[DHS2018$atleast1Net==1 & DHS2018$net_used>0]<-1
+
+# WE - quick step check -------------------
+table(DHS2018$AnyNetUse, useNA = "always")
+#    1 <NA> 
+# 5213  983 
+
 DHS2018$AnyNetUse[!is.na(DHS2018$NetCount) & DHS2018$net_used==0]<-0
+
+# WE - quick step check ------------------
+table(DHS2018$AnyNetUse, useNA = "always")
+#   0    1 <NA> 
+# 983 5213    0 
 
 sapply(list(DHS2018$atleast1Net,DHS2018$NetCount,DHS2018$NetCountNA,DHS2018$net_used,DHS2018$AnyNetUse), head, n = 20)
 
