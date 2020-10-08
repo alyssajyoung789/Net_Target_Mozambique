@@ -239,6 +239,13 @@ GPS.2018.tbl <- group_by(GPS_2018.df, LONGNUM, LATNUM) %>%
     TravTime = mean(TravTime),
     EducAttnmnt_2014 = mean(EducAttnmnt_2014))
 
+# ************************************************************************
+# WE: Note to MW - when I run the code above, I got the following message:
+# "`summarise()` regrouping output by 'LONGNUM'
+# (override with `.groups` argument)"
+# Is this ok? 
+# ************************************************************************
+
 GPS.2018.tbl <- GPS.2018.tbl[complete.cases(GPS.2018.tbl[ , 1:12]),]
 
 ##--set raster layers to 5km by 5km
