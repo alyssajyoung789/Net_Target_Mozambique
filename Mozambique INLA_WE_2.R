@@ -135,12 +135,21 @@ sapply(list(DHS2018$atleast1Net,DHS2018$NetCount,DHS2018$NetCountNA,DHS2018$net_
 # Numerator: De facto household population who could sleep under an ITN if each ITN in # the household were used by up to two people
 # Denominator: De facto household population
 DHS2018$hv013[DHS2018$hv013==0]<-DHS2018$hv009
+# WE check
+table(DHS2018$hv009, useNA = "always")
+table(DHS2018$hv013, useNA = "always")
+
+
 table(DHS2018$hv013)
 
 DHS2018$Num_Net<-DHS2018$NetCount*2
 DHS2018$PopAccess<-DHS2018$Num_Net/DHS2018$hv013
 DHS2018$PopAccess[DHS2018$PopAccess>1]<-1
 summary(DHS2018$PopAccess)
+
+# WE check - output from running the above summary line of code
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+# 0.0000  0.6667  1.0000  0.7805  1.0000  1.0000 
 
 sapply(list(DHS2018$Num_Net,DHS2018$hv013,DHS2018$PopAccess), head, n = 100)
 
