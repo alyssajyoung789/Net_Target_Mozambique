@@ -248,6 +248,12 @@ GPS.2018.tbl <- group_by(GPS_2018.df, LONGNUM, LATNUM) %>%
 
 GPS.2018.tbl <- GPS.2018.tbl[complete.cases(GPS.2018.tbl[ , 1:12]),]
 
+#******************************************************************************
+# WE note: I'm using SMOD.MOZ.raster for this step is this ok?
+# WE: Rename SMOD.MOZ.raster SMOD_2015.raster for consistency with Matt's code
+SMOD_2015.raster <- SMOD.MOZ.raster
+#******************************************************************************
+
 ##--set raster layers to 5km by 5km
 SMOD_2015.raster <- resample(SMOD_2015.raster, TravTime.raster, method='ngb')
 SMOD.agg <- aggregate(SMOD_2015.raster, fact = 5, fun = mean, na.rm=TRUE)
